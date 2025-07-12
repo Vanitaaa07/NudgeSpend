@@ -1,37 +1,106 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../../lib/supabaseClient';
+
 
 export default function AddExpensePage() {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  
   const [formData, setFormData] = useState({
     vendor: '',
     amount: '',
     category: '',
-    date: new Date().toISOString().split('T')[0], // Default to today's date
+    date: new Date().toISOString().split('T')[0],
   });
 
-  const [mode, setMode] = useState('scan'); // 'manual' or 'scan'
+  const [mode, setMode] = useState('scan');
+
+  // Check authentication status on component mount
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession();
+        console.log('Auth check result:', { session, error });
+        
+        if (error) {
+          console.error('Auth error:', error);
+        }
+        
+        if (session) {
+          setUser(session.user);
+          console.log('User logged in:', session.user);
+        } else {
+          console.log('No session found');
+        }
+      } catch (err) {
+        console.error('Error checking auth:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    checkAuth();
+
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log('Auth state changed:', event, session);
+      setUser(session?.user || null);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
 
-    // Store to localStorage (or send to API/backend)
-    const existingExpenses = JSON.parse(localStorage.getItem('expenses')) || [];
-    const newExpense = { ...formData, id: Date.now() };
-    localStorage.setItem('expenses', JSON.stringify([newExpense, ...existingExpenses]));
+    if (!user) {
+      alert('You must be logged in to add expenses.');
+      return;
+    }
 
-    alert('Expense added successfully!');
-    setFormData({
-      vendor: '',
-      amount: '',
-      category: '',
-      date: new Date().toISOString().split('T')[0],
-    });
+    try {
+      const userId = user.id;
+
+      const response = await fetch('http://localhost:5000/api/expenses', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ ...formData, userId }), // Send userId for now
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.details || 'Failed to add expense');
+      }
+
+      alert('✅ Expense added successfully!');
+
+      setFormData({
+        vendor: '',
+        amount: '',
+        category: '',
+        date: new Date().toISOString().split('T')[0],
+      });
+    } catch (err) {
+      console.error(err);
+      alert('❌ Something went wrong while adding the expense');
+    }
   };
+
+  if (loading) {
+    return (
+      <div className="max-w-xl mx-auto bg-white p-6 rounded-xl shadow-lg mt-8">
+        <div className="text-center">Loading...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-xl mx-auto bg-white p-6 rounded-xl shadow-lg mt-8">
@@ -39,8 +108,43 @@ export default function AddExpensePage() {
       <p className="text-gray-500 mb-4">
         Track your spending manually or scan receipts with AI
       </p>
+      
+      {/* Authentication Status */}
+      <div className={`mb-4 p-3 rounded-md ${user ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+        {user ? (
+          <div>
+            ✅ Logged in as: {user.email}
+            <button 
+              onClick={async () => {
+                await supabase.auth.signOut();
+                setUser(null);
+              }}
+              className="ml-2 text-sm underline"
+            >
+              Sign Out
+            </button>
+          </div>
+        ) : (
+          <div>
+            ❌ Not logged in
+            <a href="/login" className="ml-2 text-sm underline">Sign In</a>
+            <button 
+              onClick={async () => {
+                console.log('Manual session check...');
+                const { data, error } = await supabase.auth.getSession();
+                console.log('Manual session result:', { data, error });
+                if (data.session) {
+                  setUser(data.session.user);
+                }
+              }}
+              className="ml-2 text-sm underline"
+            >
+              Check Session
+            </button>
+          </div>
+        )}
+      </div>
 
-      {/* Toggle buttons */}
       <div className="flex gap-2 mb-4">
         <button
           className={`flex-1 px-4 py-2 rounded-md ${
@@ -117,8 +221,6 @@ export default function AddExpensePage() {
             <option value="Other">Other</option>
           </select>
         </div>
-
-       
 
         <button
           type="submit"

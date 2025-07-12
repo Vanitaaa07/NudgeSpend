@@ -18,5 +18,8 @@ model Expense {
   vendor    String
   amount    Float
   category  String
+  date      DateTime
   createdAt DateTime @default(now())
+
+  userId    String   // Supabase user ID
 }
